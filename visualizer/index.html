@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8">
+	<title>Network Graph Visualization</title>
+	<script src="https://d3js.org/d3.v7.min.js"></script>
+	<style>
+		#viz {
+			margin: 20;
+			padding: 0;
+			display: flex;
+			justify-content: center;
+			align-items: center;
+			min-height: 100vh;
+			position: absolute;
+			flex-direction: column;
+		}
+
+		h1 {
+			margin-top: 20px;
+			/* Adjust the top margin as needed */
+		}
+
+		.legend {
+			position: absolute;
+			top: 20px;
+			/* Adjust the top position */
+			right: 20px;
+			/* Adjust the right position */
+			background-color: #f9f9f9;
+			border: 1px solid #ccc;
+			padding: 10px;
+			font-family: Arial, sans-serif;
+		}
+
+		/* Style for legend items */
+		.legend-item {
+			margin-bottom: 5px;
+		}
+
+		.legend-color {
+			display: inline-block;
+			width: 20px;
+			height: 20px;
+			margin-right: 5px;
+			vertical-align: middle;
+		}
+	</style>
+</head>
+
+<body>
+	<div id="viz">
+		<h1>Highly co-ordinated users network</h1>
+		<div id="network">
+		</div>
+	</div>
+	<div class="legend">
+		<div class="legend-item">
+			<span class="legend-color" style="background-color: #002244;"></span> Camp2 - Bound
+		</div>
+		<div class="legend-item">
+			<span class="legend-color" style="background-color: #7CB9E8;"></span> Camp2 - Crossing
+		</div>
+		<div class="legend-item">
+			<span class="legend-color" style="background-color: #f79d9d;"></span> Camp1 - Crossing
+		</div>
+		<div class="legend-item">
+			<span class="legend-color" style="background-color: #FF4136;"></span> Camp1 - Bound
+		</div>
+	</div>
+	<script>
+		d3.csv("edges.csv").then(function (dataset) {
+			d3.csv("user_type_individual.csv").then(users => {
+				dataset = dataset.slice(0, 5000)
+				const colors = {
+					veryDarkBlue: '#002244',
+					lightBlue: '#7CB9E8',
+					veryDarkRed: '#FF4136',
+					lightRed: '#f79d9d'
+				};
+
+
+				let old = [...new Set(dataset.map(data => data.u)), ...new Set(dataset.map(data => data.v))]
+				old = [...new Set(old)]
+
+				let node_color_map = {};
+				let node_camp = {};
+
+				let camp12_user = [];
+
+				for (let user of users) {
+					if (old.includes(user.user_id)) {
+						if (user.type == "Camp2 - Crossing")
+							node_color_map[user.user_id] = colors.lightBlue;
+						else if (user.type == "Camp2 - Bound")
+							node_color_map[user.user_id] = colors.veryDarkBlue;
+						else if (user.type == "Camp1 - Crossing")
+							node_color_map[user.user_id] = colors.lightRed;
+						else if (user.type == "Camp1 - Bound"){
+							node_color_map[user.user_id] = colors.veryDarkRed;
+						}
+
+						node_camp[user.user_id] = user.type;
+						camp12_user.push(user.user_id);
+
+					}
+				}
+
+				let nodes = camp12_user.map(data => { return { id: data } })
+				let links = [];
+
+				for (const data of dataset) {
+					if (camp12_user.includes(data.u) || camp12_user.includes(data.v)) {
+						links.push({ source: data.u, target: data.v });
+						links.push({ source: data.v, target: data.u });
+					}
+				}
+
+				// Create SVG area
+				// Get screen width and height
+				const screenWidth = window.innerWidth;
+				const screenHeight = window.innerHeight - 100;
+
+				const marginTop = 50; // Set your desired top margin value
+
+				const svg = d3.select("#network")
+					.append("svg")
+					.attr("width", screenWidth)
+					.attr("height", screenHeight)
+					.style("margin-top", marginTop + "px"); // Apply the top margin to the SVG
+
+
+				const group = svg.append("g");
+
+				const maxDistanceFromCenter = 300;
+
+				// Create a simulation
+				const simulation = d3.forceSimulation(nodes)
+					.force("link", d3.forceLink(links).id(d => d.id))
+					.force("charge", d3.forceManyBody().strength(-100))
+					.force("center", d3.forceCenter(screenWidth / 2, screenHeight / 2))
+					.force("limit", (alpha) => {
+						nodes.forEach((node) => {
+							const distanceFromCenter = Math.sqrt((node.x - screenWidth / 2) ** 2 + (node.y - screenHeight / 2) ** 2);
+							if (distanceFromCenter > maxDistanceFromCenter + 100) {
+								const displacementX = (node.x - screenWidth / 2) * (maxDistanceFromCenter / distanceFromCenter);
+								const displacementY = (node.y - screenHeight / 2) * (maxDistanceFromCenter / distanceFromCenter);
+								node.x = screenWidth / 2 + displacementX;
+								node.y = screenHeight / 2 + displacementY;
+							}
+						});
+					})
+					.alphaDecay(0.1);
+
+				let zoom = d3.zoom()
+					.on('zoom', handleZoom);
+
+				function handleZoom(e) {
+					d3.select('svg g')
+						.attr('transform', e.transform);
+				}
+
+				function initZoom() {
+					d3.select('svg')
+						.call(zoom);
+				}
+
+
+				// Create links
+				const link = d3.select('svg g').selectAll("line")
+					.data(links)
+					.enter().append("line")
+					.attr("stroke", "black")
+					.attr("stroke-width", 0.2);
+
+				// Create nodes
+				const node = d3.select('svg g').selectAll("circle")
+					.data(nodes)
+					.enter().append("circle")
+					.attr("r", 10)
+					.attr("fill", (d, i) => {
+						return node_color_map[d.id];
+					});
+
+				var Tooltip = d3.select('#viz')
+					.append("div")
+					.style("opacity", 0)
+					.attr("class", "tooltip")
+					.style("position", "absolute")
+					.style("background-color", "white")
+					.style("border", "solid")
+					.style("border-width", "2px")
+					.style("border-radius", "5px")
+					.style("padding", "5px")
+
+				var mouseover = function (d) {
+					Tooltip
+						.style("opacity", 1)
+					d3.select(this)
+						.style("stroke", "black")
+						.style("opacity", 1)
+				}
+				var mousemove = function (d) {
+					console.log("Here?", d.clientX)
+					Tooltip
+						.html("The user_id of this cell is: " + d.explicitOriginalTarget.__data__.id + "<br/>" +
+							"The camp is: " + node_camp[d.explicitOriginalTarget.__data__.id] +
+							"<br/><a href='https://twitter.com/i/user/" + d.explicitOriginalTarget.__data__.id + "' target='_blank'>Link to user profile</a>")
+						.style("left", (d.clientX) + "px")
+						.style("top", (d.clientY) + "px")
+				}
+				var mouseleave = function (d) {
+					setTimeout(() => {
+						Tooltip
+							.style("opacity", 0.5)
+						d3.select(this)
+							.style("stroke", "none")
+							.style("opacity", 0.8)
+					}, 2000);
+				}
+
+				node
+					.on("mouseover", mouseover)
+					.on("mousemove", mousemove)
+					.on("mouseleave", mouseleave)
+
+				// Update node and link positions
+				simulation.on("tick", () => {
+					link
+						.attr("x1", d => d.source.x)
+						.attr("y1", d => d.source.y)
+						.attr("x2", d => d.target.x)
+						.attr("y2", d => d.target.y);
+
+					node
+						.attr("cx", d => d.x)
+						.attr("cy", d => d.y);
+				});
+				initZoom();
+			});
+		});
+	</script>
+
+</body>
+
+</html>
